@@ -119,264 +119,280 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+#qua andiamo a gestire il login dell'utente, usando il nostro secrets.toml per 
+#eseguire accesso tramite Microsoft Azure Entra
+if not st.experimental_user.is_logged_in:
+    st.title("Microsoft Login:streamlit:")
+    st.subheader(f":material/Login: {current_lang['login_prompt']}")
+    logging.info("Launched app, waiting for the User Login.")
 
+    if st.button(current_lang["login_button"]):
+        st.login()
 
-# il titolo della nostra app con qualche edit estetico
-st.markdown(f"# {current_lang['extract_data_title']}")
+else:
+    if st.button(current_lang["logout_button"]):
+        st.logout()
+
+    if st.experimental_user.is_logged_in:
+        st.markdown(current_lang["greeting"].format(name=st.experimental_user.name, email=st.experimental_user.email))
+        logging.info(f"User {st.experimental_user.name} ({st.experimental_user.email}) successfully logged in.")
+
+    # il titolo della nostra app con qualche edit estetico
+    st.markdown(f"# {current_lang['extract_data_title']}")
 
 
 #la funzione per gestire il file che viene caricato, se non è vuota allora il file
 #viene letto, andando a verificare però che il file sia un file pdf, ed in caso creando
 #un file temporaneo per esso, in caso contrario restituisce errore, con qualche log pure
-def handle_file_upload(uploaded_file):
-    if uploaded_file is not None:
-        file_content = uploaded_file.read()
-        file_type = uploaded_file.type
-        file_extension = uploaded_file.name.split(".")[-1].lower()
-        temporary_file_path = f"temp.{file_extension}"
+    def handle_file_upload(uploaded_file):
+        if uploaded_file is not None:
+            file_content = uploaded_file.read()
+            file_type = uploaded_file.type
+            file_extension = uploaded_file.name.split(".")[-1].lower()
+            temporary_file_path = f"temp.{file_extension}"
 
 #definiamo la funzione per i PDF, di solito i primi bytes contengono %PDF quindi ci basta questo
 #per assicurarci lo sia, invece per le img, potendo avere schemi differenti, non sempre è così, quindi
 #usiamo la lib Pillow e il modulo io per aprire e verificare il contenuto
-        def file_PDF(file_content):
-            return file_content.startswith(b'%PDF')
+            def file_PDF(file_content):
+                return file_content.startswith(b'%PDF')
 
-        def file_IMG(file_content):
-            try:
+            def file_IMG(file_content):
+                try:
 
-                img = Image.open(io.BytesIO(file_content))
-                img.verify() 
-                return True
-            except Exception as e:
-                logging.warning(f"Invalid image file: {e}")
-                return False
+                    img = Image.open(io.BytesIO(file_content))
+                    img.verify() 
+                    return True
+                except Exception as e:
+                    logging.warning(f"Invalid image file: {e}")
+                    return False
 
 #qua poniamo dei semplici blocchi if ed elif, affinchè se nelle nostre funzioni è presente il file_content
 #allora creiamo un file temporaneo in writing-binary mode con il file_content in esso, altrimenti restituisce errore
-        if file_type == "application/pdf" or file_extension == "pdf":
-            if file_PDF(file_content):
-                with open(temporary_file_path, "wb") as temporary_file:
-                    temporary_file.write(file_content)
-                logging.info(f"PDF file {uploaded_file.name} saved to temporary path.")
-                return temporary_file_path, file_content
-            else:
-                logging.warning(f"Invalid PDF file uploaded: {uploaded_file.name}")
-                st.error(current_lang["invalid_file_error"].format(file_type="PDF", file_name=uploaded_file.name))
-                return None, None
+            if file_type == "application/pdf" or file_extension == "pdf":
+                if file_PDF(file_content):
+                    with open(temporary_file_path, "wb") as temporary_file:
+                        temporary_file.write(file_content)
+                    logging.info(f"PDF file {uploaded_file.name} saved to temporary path.")
+                    return temporary_file_path, file_content
+                else:
+                    logging.warning(f"Invalid PDF file uploaded: {uploaded_file.name}")
+                    st.error(current_lang["invalid_file_error"].format(file_type="PDF", file_name=uploaded_file.name))
+                    return None, None
 
-        elif file_extension in ("jpg", "jpeg", "png"):
-            if file_IMG(file_content):
-                with open(temporary_file_path, "wb") as temporary_file:
-                    temporary_file.write(file_content)
-                logging.info(f"Image file {uploaded_file.name} saved to temporary path.")
-                return temporary_file_path, file_content
-            else:
-                logging.warning(f"Invalid {file_extension.upper()} file uploaded: {uploaded_file.name}")
-                st.error(current_lang["invalid_file_error"].format(file_type=file_extension.upper(), file_name=uploaded_file.name))
-                return None, None
+            elif file_extension in ("jpg", "jpeg", "png"):
+                if file_IMG(file_content):
+                    with open(temporary_file_path, "wb") as temporary_file:
+                        temporary_file.write(file_content)
+                    logging.info(f"Image file {uploaded_file.name} saved to temporary path.")
+                    return temporary_file_path, file_content
+                else:
+                    logging.warning(f"Invalid {file_extension.upper()} file uploaded: {uploaded_file.name}")
+                    st.error(current_lang["invalid_file_error"].format(file_type=file_extension.upper(), file_name=uploaded_file.name))
+                    return None, None
 
+            else:
+                logging.warning(f"Unsupported file type uploaded: {file_type} - {uploaded_file.name}")
+                st.error(current_lang["unsupported_file_error"].format(file_name=uploaded_file.name))
+                return None, None
         else:
-            logging.warning(f"Unsupported file type uploaded: {file_type} - {uploaded_file.name}")
-            st.error(current_lang["unsupported_file_error"].format(file_name=uploaded_file.name))
+            logging.warning("There's no file uploaded, please follow the right instructions")
+            st.warning(current_lang["no_file_warning"])
             return None, None
-    else:
-        logging.warning("There's no file uploaded, please follow the right instructions")
-        st.warning(current_lang["no_file_warning"])
-        return None, None
 
 #definiamo una funziona avente come parametro i nostri dati
-def edit_data(data):
-    data_it = {}
+    def edit_data(data):
+        data_it = {}
 
-    # qua creiamo una lista di dizionari per rappresentare gli elementi estratti e ciascun dizionario contiene le 
-    # colonne del dataframe come chiavi e i valori corrispondenti dagli elementi estratti
-    if "Items" in data:
-        if data["Items"]:
-            items = [{current_lang["dataframe_columns"][i]: item.get(key, None) 
-                    for i, key in enumerate(item.keys())} for item in data["Items"]]
-            df = pd.DataFrame(items, columns=current_lang["dataframe_columns"])
-        else:
-            df = pd.DataFrame(columns=current_lang["dataframe_columns"])
+        # qua creiamo una lista di dizionari per rappresentare gli elementi estratti e ciascun dizionario contiene le 
+        # colonne del dataframe come chiavi e i valori corrispondenti dagli elementi estratti
+        if "Items" in data:
+            if data["Items"]:
+                items = [{current_lang["dataframe_columns"][i]: item.get(key, None) 
+                        for i, key in enumerate(item.keys())} for item in data["Items"]]
+                df = pd.DataFrame(items, columns=current_lang["dataframe_columns"])
+            else:
+                df = pd.DataFrame(columns=current_lang["dataframe_columns"])
 
-    edited_df = st.data_editor(df, num_rows="dynamic", key="items_df")
-    lista_prodotti = edited_df.to_dict("records")
+        edited_df = st.data_editor(df, num_rows="dynamic", key="items_df")
+        lista_prodotti = edited_df.to_dict("records")
 
-    #creiamo un form per poter modificare i dati in italiano, con i parametri che andremo ad aggiornare
-    with st.form(key="edit_form"):
-        data_it["Nome Venditore"] = st.text_input(current_lang["text_input"][0], value=data.get("VendorName", "N/A"), key="vendor_name")
-        data_it["Indirizzo Venditore"] = st.text_input(current_lang["text_input"][1], value=data.get("VendorAddress", "N/A"), key="vendor_address")
-        data_it["Numero di telefono Venditore"] = st.text_input(current_lang["text_input"][2], value=data.get("MerchantPhoneNumber", "N/A"), key="vendor_phone")
-        data_it["Data"] = st.text_input(current_lang["text_input"][3], value=data.get("InvoiceDate", "N/A"), key="invoice_date")
-        data_it["Orario"] = st.text_input(current_lang["text_input"][4], value=data.get("TransactionTime", "N/A"), key="transaction_time")
-        data_it["PIVA"] = st.text_input(current_lang["text_input"][5], value=data.get("VendorTaxId", "N/A"), key="vendor_tax_id")
-        data_it["Totale"] = st.text_input(current_lang["text_input"][6], value=data.get("InvoiceTotal", "N/A"), key="invoice_total")
+        #creiamo un form per poter modificare i dati in italiano, con i parametri che andremo ad aggiornare
+        with st.form(key="edit_form"):
+            data_it["Nome Venditore"] = st.text_input(current_lang["text_input"][0], value=data.get("VendorName", "N/A"), key="vendor_name")
+            data_it["Indirizzo Venditore"] = st.text_input(current_lang["text_input"][1], value=data.get("VendorAddress", "N/A"), key="vendor_address")
+            data_it["Numero di telefono Venditore"] = st.text_input(current_lang["text_input"][2], value=data.get("MerchantPhoneNumber", "N/A"), key="vendor_phone")
+            data_it["Data"] = st.text_input(current_lang["text_input"][3], value=data.get("InvoiceDate", "N/A"), key="invoice_date")
+            data_it["Orario"] = st.text_input(current_lang["text_input"][4], value=data.get("TransactionTime", "N/A"), key="transaction_time")
+            data_it["PIVA"] = st.text_input(current_lang["text_input"][5], value=data.get("VendorTaxId", "N/A"), key="vendor_tax_id")
+            data_it["Totale"] = st.text_input(current_lang["text_input"][6], value=data.get("InvoiceTotal", "N/A"), key="invoice_total")
 
-        #andiamo ad aprire il file temporaneo in modo tale da poterlo usare per l'ocr, usando pymupdf con tesseract integrato
-        # e salvando il file in memoria, in modo tale da poterlo usare per l'ocr
-        try:
-            doc = pymupdf.open(temporary_file_path)
-            page = doc[0]
-            pix = page.get_pixmap()
+            #andiamo ad aprire il file temporaneo in modo tale da poterlo usare per l'ocr, usando pymupdf con tesseract integrato
+            # e salvando il file in memoria, in modo tale da poterlo usare per l'ocr
+            try:
+                doc = pymupdf.open(temporary_file_path)
+                page = doc[0]
+                pix = page.get_pixmap()
 
-            ocr_pdf_bytes = pix.pdfocr_tobytes(
-                compress=True,
-                language='eng+ita',
-                tessdata= os.getenv("TESSDATA_PREFIX"),
-            )
-
-            ocr_doc = pymupdf.open("pdf", ocr_pdf_bytes)
-
-        except Exception as e:
-            logging.error(f"Errore durante l'OCR e la generazione del PDF: {e}")
-            st.error(f"Errore durante l'OCR e la generazione del PDF: {e}")
-
-        #andiamo ad aprire il nostro file ocr pdf, prendiamo il testo della prima pagina dai blocchi e creiamo un'immagine
-        #con il pixmap, in modo tale da poter disegnare sopra l'immagine i rettangoli
-        try:
-
-            ocr_doc = pymupdf.open("pdf", ocr_pdf_bytes)
-            for page_num in range(len(ocr_doc)):
-                page = ocr_doc[page_num]
-            blocks = page.get_text("blocks")
-            pix2 = page.get_pixmap()
-            img = Image.open(io.BytesIO(pix2.tobytes("png")))
-            draw = ImageDraw.Draw(img)
-
-        #qua andiamo a creare un dizionario per evidenziare i blocchi di testo,
-        # in modo tale da non evidenziare più volte lo stesso parametro
-            highlighted = {key: False for key in data_it}
-
-        #definiamo una funzione per evidenziare i blocchi di testo, in modo tale da poterli disegnare sopra l'immagine
-            #evidenziando i parametri che andiamo a modificare, in modo tale da poterli vedere meglio, impostiamo poi un margine
-            #per il disegno del rettangolo, in modo tale da non coprire il testo
-            def highlight_block(block, color):
-                rect = pymupdf.Rect(block[:4])
-                draw.rectangle(
-                    [rect.x0 - 4, rect.y0 - 4, rect.x1 + 4, rect.y1 + 4],
-                    outline=color,
-                    width=2
+                ocr_pdf_bytes = pix.pdfocr_tobytes(
+                    compress=True,
+                    language='eng+ita',
+                    tessdata= os.getenv("TESSDATA_PREFIX"),
                 )
 
-            #andiamo a disegnare i rettangoli sopra l'immagine, soltanto sui parametri presenti in data_it
-            #e sui prodotti presenti nella lista_prodotti, in modo tale da evidenziare i dati
-            for block in blocks:
-                block_text = block[4]
+                ocr_doc = pymupdf.open("pdf", ocr_pdf_bytes)
 
-            ##qua con un ciclo andiamo a verificare se il testo del blocco è presente nei dati estratti e se non è già evidenziato,
-            #allora se il modulo fuzzywuzzy trova una corrispondenza, evidenziamo il blocco e impostiamo il valore a True
-                for key, value in data_it.items():
-                    if not highlighted[key] and fuzz.partial_ratio(value.lower(), block_text.lower()) > 80:  
-                        highlight_block(block, "red")
-                        highlighted[key] = True 
+            except Exception as e:
+                logging.error(f"Errore durante l'OCR e la generazione del PDF: {e}")
+                st.error(f"Errore durante l'OCR e la generazione del PDF: {e}")
 
-            #stessa cosa di prima ma per i prodotti, in modo tale da evidenziare anche quelli, migliorando 
-            #l'analisi grazie al modulo fuzzywuzzy
-                for item in lista_prodotti:
-                    for item_key, item_value in item.items():
-                        if fuzz.partial_ratio(str(item_value).lower(), block_text.lower()) > 80:
-                            highlight_block(block, "blue")
+            #andiamo ad aprire il nostro file ocr pdf, prendiamo il testo della prima pagina dai blocchi e creiamo un'immagine
+            #con il pixmap, in modo tale da poter disegnare sopra l'immagine i rettangoli
+            try:
 
-            # qua mostriamo l'immagine con le aree evidenziate e width predefinita, e creiamo un bottone per il download
-            # del file json e per aggiornare i dati, con un messaggio di successo o errore
-            st.image(img, width = 500, caption="PDF con aree evidenziate")
+                ocr_doc = pymupdf.open("pdf", ocr_pdf_bytes)
+                for page_num in range(len(ocr_doc)):
+                    page = ocr_doc[page_num]
+                blocks = page.get_text("blocks")
+                pix2 = page.get_pixmap()
+                img = Image.open(io.BytesIO(pix2.tobytes("png")))
+                draw = ImageDraw.Draw(img)
 
-        except Exception as e:
-            logging.error(f"Errore durante il disegno dei rettangoli: {e}")
-            st.error(f"Errore durante il disegno dei rettangoli: {e}")
+            #qua andiamo a creare un dizionario per evidenziare i blocchi di testo,
+            # in modo tale da non evidenziare più volte lo stesso parametro
+                highlighted = {key: False for key in data_it}
 
-        submit_button = st.form_submit_button(label=current_lang["update_download_button"])
+            #definiamo una funzione per evidenziare i blocchi di testo, in modo tale da poterli disegnare sopra l'immagine
+                #evidenziando i parametri che andiamo a modificare, in modo tale da poterli vedere meglio, impostiamo poi un margine
+                #per il disegno del rettangolo, in modo tale da non coprire il testo
+                def highlight_block(block, color):
+                    rect = pymupdf.Rect(block[:4])
+                    draw.rectangle(
+                        [rect.x0 - 4, rect.y0 - 4, rect.x1 + 4, rect.y1 + 4],
+                        outline=color,
+                        width=2
+                    )
 
-    if submit_button:
-        json_data_italiano = {
-            "Nome Venditore": data_it["Nome Venditore"],
-            "Indirizzo Venditore": data_it["Indirizzo Venditore"],
-            "Numero di telefono Venditore": data_it["Numero di telefono Venditore"],
-            "Data": data_it["Data"],
-            "Orario": data_it["Orario"],
-            "PIVA": data_it["PIVA"],
-            "Totale": data_it["Totale"],
-            "Lista Prodotti": lista_prodotti
-        }
-    #usando un try-except per gestire eventuali errori, andiamo a creare un file json usando la libreria json e buffer
-    #che andremo a scrivere e scaricare, in caso di successo restituisce un messaggio di successo, altrimenti un errore
-    #relativo all'aggiornamento e download del file, restituisce i dati in italiano aggiornati 
-        try:
-            json_string = json.dumps(json_data_italiano, indent=4, ensure_ascii=False)
-            buff = BytesIO()
-            buff.write(json_string.encode('utf-8'))
-            buff.seek(0)
+                #andiamo a disegnare i rettangoli sopra l'immagine, soltanto sui parametri presenti in data_it
+                #e sui prodotti presenti nella lista_prodotti, in modo tale da evidenziare i dati
+                for block in blocks:
+                    block_text = block[4]
 
-            components.html(
-                download_button(buff.getvalue(), f"{st.session_state['uploaded_file_name']}.json"),
-                height=0,
-            )
-            st.success(current_lang["json_success"])
-            logging.info(f"JSON file {st.session_state['uploaded_file_name']}.json downloaded successfully.")
+                ##qua con un ciclo andiamo a verificare se il testo del blocco è presente nei dati estratti e se non è già evidenziato,
+                #allora se il modulo fuzzywuzzy trova una corrispondenza, evidenziamo il blocco e impostiamo il valore a True
+                    for key, value in data_it.items():
+                        if not highlighted[key] and fuzz.partial_ratio(value.lower(), block_text.lower()) > 80:  
+                            highlight_block(block, "red")
+                            highlighted[key] = True 
 
-        except Exception as e:
-            logging.error(f"Error during the data update and download: {e}")
-            st.error(current_lang["json_error"].format(error=e))
-        finally:
-            ocr_doc.close()
-            doc.close()
-            os.remove(temporary_file_path)
-            logging.info(f"Temporary file {temporary_file_path} deleted.")
+                #stessa cosa di prima ma per i prodotti, in modo tale da evidenziare anche quelli, migliorando 
+                #l'analisi grazie al modulo fuzzywuzzy
+                    for item in lista_prodotti:
+                        for item_key, item_value in item.items():
+                            if fuzz.partial_ratio(str(item_value).lower(), block_text.lower()) > 80:
+                                highlight_block(block, "blue")
 
-    return data_it
+                # qua mostriamo l'immagine con le aree evidenziate e width predefinita, e creiamo un bottone per il download
+                # del file json e per aggiornare i dati, con un messaggio di successo o errore
+                st.image(img, width = 500, caption="PDF con aree evidenziate")
 
-#usiamo la funzione di streamlit per caricare un file pdf e consentire solo quel formato
-uploaded_file = st.file_uploader(
-    label=current_lang["upload_label"], 
-    type=["pdf", "jpg","png", "jpeg"],
-    key="file_uploader"
-    )
-logging.info("Waiting for the file upload")
+            except Exception as e:
+                logging.error(f"Errore durante il disegno dei rettangoli: {e}")
+                st.error(f"Errore durante il disegno dei rettangoli: {e}")
 
-#inizializziamo le variabili di sessione che andremo ad utilizzare
-if 'extracted_data' not in st.session_state:
-    st.session_state['extracted_data'] = None
-if 'uploaded_file_name' not in st.session_state:
-    st.session_state['uploaded_file_name'] = None
+            submit_button = st.form_submit_button(label=current_lang["update_download_button"])
+
+        if submit_button:
+            json_data_italiano = {
+                "Nome Venditore": data_it["Nome Venditore"],
+                "Indirizzo Venditore": data_it["Indirizzo Venditore"],
+                "Numero di telefono Venditore": data_it["Numero di telefono Venditore"],
+                "Data": data_it["Data"],
+                "Orario": data_it["Orario"],
+                "PIVA": data_it["PIVA"],
+                "Totale": data_it["Totale"],
+                "Lista Prodotti": lista_prodotti
+            }
+        #usando un try-except per gestire eventuali errori, andiamo a creare un file json usando la libreria json e buffer
+        #che andremo a scrivere e scaricare, in caso di successo restituisce un messaggio di successo, altrimenti un errore
+        #relativo all'aggiornamento e download del file, restituisce i dati in italiano aggiornati 
+            try:
+                json_string = json.dumps(json_data_italiano, indent=4, ensure_ascii=False)
+                buff = BytesIO()
+                buff.write(json_string.encode('utf-8'))
+                buff.seek(0)
+
+                components.html(
+                    download_button(buff.getvalue(), f"{st.session_state['uploaded_file_name']}.json"),
+                    height=0,
+                )
+                st.success(current_lang["json_success"])
+                logging.info(f"JSON file {st.session_state['uploaded_file_name']}.json downloaded successfully.")
+
+            except Exception as e:
+                logging.error(f"Error during the data update and download: {e}")
+                st.error(current_lang["json_error"].format(error=e))
+            finally:
+                ocr_doc.close()
+                doc.close()
+                os.remove(temporary_file_path)
+                logging.info(f"Temporary file {temporary_file_path} deleted.")
+
+        return data_it
+
+    #usiamo la funzione di streamlit per caricare un file pdf e consentire solo quel formato
+    uploaded_file = st.file_uploader(
+        label=current_lang["upload_label"], 
+        type=["pdf", "jpg","png", "jpeg"],
+        key="file_uploader"
+        )
+    logging.info("Waiting for the file upload")
+
+    #inizializziamo le variabili di sessione che andremo ad utilizzare
+    if 'extracted_data' not in st.session_state:
+        st.session_state['extracted_data'] = None
+    if 'uploaded_file_name' not in st.session_state:
+        st.session_state['uploaded_file_name'] = None
 
 #se il file è stato caricato con successo , gestiamo l'upload con la nostra funzione
 #e creiamo un file temporaneo, che verrà aperto in formato binario e verrà letto restituendo
 #estracted_data come variabile, in caso contrario restituisce un errore durante l'aalisi del documento
-if uploaded_file is not None:
-    #inseriamo la variabile di sessione per l'uploaded_file in modo tale da
-    #riavviare l'analisi in caso di cambio file caricato, resettando i dati estratti
-    if uploaded_file.name != st.session_state['uploaded_file_name']:
-        st.session_state['extracted_data'] = None  
-        st.session_state['uploaded_file_name'] = uploaded_file.name
+    if uploaded_file is not None:
+        #inseriamo la variabile di sessione per l'uploaded_file in modo tale da
+        #riavviare l'analisi in caso di cambio file caricato, resettando i dati estratti
+        if uploaded_file.name != st.session_state['uploaded_file_name']:
+            st.session_state['extracted_data'] = None  
+            st.session_state['uploaded_file_name'] = uploaded_file.name
 
-    st.success(current_lang["success_upload"].format(file_name=uploaded_file.name))
-    logging.info(f"File {uploaded_file.name} uploaded successfully.")
+        st.success(current_lang["success_upload"].format(file_name=uploaded_file.name))
+        logging.info(f"File {uploaded_file.name} uploaded successfully.")
 
-    temporary_file_path, file_content = handle_file_upload(uploaded_file)
+        temporary_file_path, file_content = handle_file_upload(uploaded_file)
 
-    if temporary_file_path:
+        if temporary_file_path:
 
-        if st.session_state['extracted_data'] is None:
-            with st.spinner(current_lang["analyzing_document"]):
-                logging.info("Analyzing the document...")
-                try:
-                    with open(temporary_file_path, "rb") as f: 
-                        file_content = f.read()
-                        st.session_state['extracted_data'] = analyze_invoice(file_content)
-                    logging.info("Document analysis completed successfully.")
-                except Exception as e:
-                    logging.error(f"Error during document analysis: {e}")
-                    st.error(current_lang["error_upload"].format(error=e))
-                    st.session_state['extracted_data'] = None
-                    logging.error("Document analysis failed.")
+            if st.session_state['extracted_data'] is None:
+                with st.spinner(current_lang["analyzing_document"]):
+                    logging.info("Analyzing the document...")
+                    try:
+                        with open(temporary_file_path, "rb") as f: 
+                            file_content = f.read()
+                            st.session_state['extracted_data'] = analyze_invoice(file_content)
+                        logging.info("Document analysis completed successfully.")
+                    except Exception as e:
+                        logging.error(f"Error during document analysis: {e}")
+                        st.error(current_lang["error_upload"].format(error=e))
+                        st.session_state['extracted_data'] = None
+                        logging.error("Document analysis failed.")
 
-        #se i dati estratti sono presenti usiamo la funzione per poter permettere la 
-        #modifica di essi, in caso contrario restituisce un errore di estrazione dati
-        if st.session_state['extracted_data']:
-            st.header(current_lang["product_list"])
-            edit_data(st.session_state['extracted_data'])
+            #se i dati estratti sono presenti usiamo la funzione per poter permettere la 
+            #modifica di essi, in caso contrario restituisce un errore di estrazione dati
+            if st.session_state['extracted_data']:
+                st.header(current_lang["product_list"])
+                edit_data(st.session_state['extracted_data'])
+            else:
+                st.error(current_lang["data_extraction_error"])
+                logging.error("Failed to extract data from the document.")
         else:
-            st.error(current_lang["data_extraction_error"])
-            logging.error("Failed to extract data from the document.")
-    else:
-        logging.warning("File upload failed.")
-        st.warning(current_lang["no_file_warning"])
+            logging.warning("File upload failed.")
+            st.warning(current_lang["no_file_warning"])
